@@ -37,6 +37,39 @@ function getDeletionScheduleDateBounds(): { minIso: string; maxIso: string } {
   };
 }
 
+function addDaysToIsoDate(isoDate: string, days: number): string {
+  const d = new Date(`${isoDate}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+type LiftExclusionDecision =
+  | { kind: "simple" }
+  | { kind: "auto_next_day"; nextDateIso: string }
+  | { kind: "choose_date"; suggestedDateIso: string; frameEndIso: string };
+
+function getLiftExclusionDecision(
+  db: DatabaseRow,
+  minScheduleIso: string,
+  maxScheduleIso: string,
+  todayIso: string
+): LiftExclusionDecision {
+  // Apply special handling only for LIVE backup+delete flows that have an implementation/action anchor.
+  if (db.action !== "Backup & Delete" || !db.actionDate) return { kind: "simple" };
+
+  const frameEndIso = addDaysToIsoDate(new Date(db.actionDate).toISOString().slice(0, 10), 30);
+  if (todayIso >= frameEndIso) {
+    return { kind: "auto_next_day", nextDateIso: minScheduleIso };
+  }
+
+  const suggestedDateIso = frameEndIso > minScheduleIso ? frameEndIso : minScheduleIso;
+  return {
+    kind: "choose_date",
+    suggestedDateIso: suggestedDateIso > maxScheduleIso ? maxScheduleIso : suggestedDateIso,
+    frameEndIso,
+  };
+}
+
 /** Compute a human-readable "Day X of Y — Z days remain" label */
 function deletionCountdown(
   actionDate: string | null,
@@ -736,6 +769,12 @@ export function Overview({
   const [scheduleDbId, setScheduleDbId] = useState<string | null>(null);
   const [scheduleDate, setScheduleDate] = useState("");
   const [confirmDeleteDbId, setConfirmDeleteDbId] = useState<string | null>(null);
+  const [liftExclusionPrompt, setLiftExclusionPrompt] = useState<{
+    dbId: string;
+    dbName: string;
+    frameEndIso: string;
+  } | null>(null);
+  const [liftExclusionDate, setLiftExclusionDate] = useState("");
   const [confirmOverride, setConfirmOverride] = useState<{
     dbId: string;
     action: ConfirmOverrideAction;
@@ -940,6 +979,38 @@ export function Overview({
     scheduleDeletionByDate(scheduleDbId, deletionDateIso);
     setScheduleDbId(null);
     setScheduleDate("");
+  }
+
+  function openLiftExclusionFlow(db: DatabaseRow) {
+    const decision = getLiftExclusionDecision(db, minScheduleIso, maxScheduleIso, todayIso);
+    if (decision.kind === "simple") {
+      liftExclusion(db.id);
+      return;
+    }
+    if (decision.kind === "auto_next_day") {
+      const deletionDateIso = new Date(`${decision.nextDateIso}T00:00:00.000Z`).toISOString();
+      scheduleDeletionByDate(db.id, deletionDateIso);
+      return;
+    }
+    setLiftExclusionPrompt({
+      dbId: db.id,
+      dbName: db.name,
+      frameEndIso: decision.frameEndIso,
+    });
+    setLiftExclusionDate(decision.suggestedDateIso);
+  }
+
+  function closeLiftExclusionPrompt() {
+    setLiftExclusionPrompt(null);
+    setLiftExclusionDate("");
+  }
+
+  function confirmLiftExclusionDate() {
+    if (!liftExclusionPrompt || !liftExclusionDate) return;
+    if (liftExclusionDate < minScheduleIso || liftExclusionDate > maxScheduleIso) return;
+    const deletionDateIso = new Date(`${liftExclusionDate}T00:00:00.000Z`).toISOString();
+    scheduleDeletionByDate(liftExclusionPrompt.dbId, deletionDateIso);
+    closeLiftExclusionPrompt();
   }
 
   const confirmDeleteDb = confirmDeleteDbId
@@ -1609,7 +1680,7 @@ export function Overview({
                                 <ActionBtn
                                   label="Lift Exclusion"
                                   variant="ghost"
-                                  onClick={() => liftExclusion(r.id)}
+                                  onClick={() => openLiftExclusionFlow(r)}
                                 />
                               ) : status === "Pending Deletion" ? (
                                 <>
@@ -1841,6 +1912,78 @@ export function Overview({
               </button>
               <button type="button" className="c-btn-primary" onClick={confirmDeleteNow}>
                 Delete now
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Lift exclusion scheduling modal for LIVE 30-day frame */}
+      {liftExclusionPrompt && (
+        <>
+          <div
+            className="fixed inset-0 z-[180]"
+            style={{ background: "rgba(13,22,29,0.24)" }}
+            onClick={closeLiftExclusionPrompt}
+            aria-hidden
+          />
+          <div
+            className="fixed left-1/2 top-1/2 z-[190] w-[430px] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-[6px] bg-white"
+            style={{ border: "1px solid #ECEFF2", boxShadow: "0 8px 28px rgba(13,22,29,0.28)" }}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="lift-exclusion-title"
+          >
+            <div
+              className="flex items-center justify-between border-b px-4 py-3"
+              style={{ borderColor: "#ECEFF2", background: "#F7F8FA" }}
+            >
+              <h3 id="lift-exclusion-title" className="text-[14px] font-semibold" style={{ color: "#5D6F7E" }}>
+                Lift exclusion and schedule date
+              </h3>
+              <button
+                type="button"
+                className="text-[16px]"
+                style={{ color: "#96A3AF" }}
+                onClick={closeLiftExclusionPrompt}
+                aria-label="Close lift exclusion dialog"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="space-y-3 px-4 py-4">
+              <p className="text-[12px]" style={{ color: "#354756" }}>
+                <span className="font-medium">{liftExclusionPrompt.dbName}</span> is still inside the LIVE 30-day frame
+                (ends {formatShortDate(liftExclusionPrompt.frameEndIso)}).
+              </p>
+              <p className="text-[11px]" style={{ color: "#5D6F7E" }}>
+                Choose a new deletion date from <strong style={{ color: "#354756" }}>tomorrow</strong> up to{" "}
+                <strong style={{ color: "#354756" }}>two months from today</strong> (
+                {formatShortDate(minScheduleIso)} – {formatShortDate(maxScheduleIso)}).
+              </p>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px]" style={{ color: "#5D6F7E" }}>Deletion date</span>
+                <input
+                  type="date"
+                  className="c-input w-full"
+                  min={minScheduleIso}
+                  max={maxScheduleIso}
+                  value={liftExclusionDate}
+                  onChange={(e) => setLiftExclusionDate(e.target.value)}
+                />
+              </label>
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t px-4 py-3" style={{ borderColor: "#ECEFF2" }}>
+              <button type="button" className="c-btn-ghost" onClick={closeLiftExclusionPrompt}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="c-btn-primary"
+                disabled={!liftExclusionDate || liftExclusionDate < minScheduleIso || liftExclusionDate > maxScheduleIso}
+                onClick={confirmLiftExclusionDate}
+              >
+                Save date
               </button>
             </div>
           </div>

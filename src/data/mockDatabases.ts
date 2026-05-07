@@ -49,7 +49,7 @@ function row(
   };
 }
 
-/** 18 mock databases — matches wireframe sketch rows + extras */
+/** 19 mock databases — matches wireframe sketch rows + extras */
 export const initialDatabases: DatabaseRow[] = [
   // ── Expires today (Day 5 of 5) ──
   row("db-1",  "WholeDentalWellness_C1",        "Aquila-1",  "Build VM",  12.3, "Delete",          "Trigger 1", "SB Completed",       d(-5),  d(0),   5, true),
@@ -65,6 +65,8 @@ export const initialDatabases: DatabaseRow[] = [
   row("db-7",  "CarePlusOrtho_C1",              "Aquila-3",  "Build VM",  18,   "None",            "None",      null,                 d(-5),  null,   null, true),
   row("db-8",  "CarePlusOrtho_C1_LIVE",         "Aquila-1",  "Aquila",    25,   "None",            "None",      null,                 d(-36), null,   null, false),
   row("db-9",  "NorthBridgeDental_C3_LIVE",     "Raven-1",   "Raven",     12.4, "None",            "None",      null,                 d(-84), null,   null, false),
+  // Extra LIVE excluded case: still inside 30-day frame, useful to test "Lift Exclusion" reschedule prompt.
+  row("db-19", "CarePlusOrtho_C1_LIVE_2",       "Aquila-2",  "Aquila",    27,   "Backup & Delete", "Trigger 2", "LIVE Completed",     d(-20), d(10),  30, false, true),
   // ── Active / No action ──
   row("db-10", "LakesideDental_C4",             "Raven-2",   "Raven",     8.2,  "None",            "None",      null,                 null,   null,   null, false),
   row("db-11", "LakesideDental_C4_SB",          "Aquila-3",  "Build VM",  15,   "None",            "None",      null,                 null,   null,   null, true),

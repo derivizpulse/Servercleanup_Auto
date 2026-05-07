@@ -160,7 +160,7 @@ export const useDerivizStore = create<DerivizState>()((set, get) => {
   return {
     databases: initialDatabases.map((d) => normalizeLegacyDeliverableStatus({ ...d })),
     blobs: initialBlobs.map((b) => ({ ...b })),
-    excludedIds: ["db-7", "db-8", "db-9"],
+    excludedIds: ["db-7", "db-8", "db-9", "db-19"],
     deletedIds: ["db-10", "db-14"],
     deletedAtById: {
       "db-10": addDaysIso(new Date(), -4),
@@ -170,7 +170,7 @@ export const useDerivizStore = create<DerivizState>()((set, get) => {
       {
         id: newId(),
         at: new Date().toISOString(),
-        message: "Deriviz initialized — 18 databases across 4 server groups",
+        message: "Deriviz initialized — 19 databases across 4 server groups",
         dbName: "—",
         server: "All",
         category: "system",
