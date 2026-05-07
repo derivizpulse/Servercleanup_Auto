@@ -6,7 +6,7 @@ const READ_ONLY =
   "This page only explains the rules. Use the Overview tab for in-scope DBs, last run times, and exclusions.";
 
 const TRIGGER1_STEPS = [
-  "The Conversion team marks SB and ITL deliverables complete in their workflow.",
+  "The Conversion team marks SB completed and ITL completed as separate milestones in their workflow.",
   "That completion status is synced into Deriviz and evaluates Trigger 1.",
   "For each in-scope Build VM database that was restored via the Staging Restorer flow and is not excluded in this app, Deriviz sets Delete and a 5-day deletion clock (Staging Restorer policy).",
   "A system line is written to the Audit log; linked blob backups for those Build VM DBs follow the retention and lifecycle messaging (see the Blob tab when applicable).",
@@ -55,7 +55,7 @@ export function Triggers() {
         className="rounded-[4px] border px-3 py-2.5 text-[11px] leading-relaxed"
         style={{ borderColor: "#D9E7EA", background: "#F0FAFC", color: "#1E4E59" }}
       >
-        SB/ITL/LIVE completion is marked by the Conversion team in their flow, and those updates sync here.
+        SB completed, ITL completed, and LIVE completed are tracked as separate milestone updates in the Conversion team flow, and those updates sync here.
         This tab documents the automation logic; operational cleanup remains on <strong>Overview</strong>.
       </div>
 
@@ -84,8 +84,8 @@ export function Triggers() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <TriggerCard
-          title="Trigger 1 — SB & ITL deliverables marked complete"
-          description="Fires when the Conversion team marks SB/ITL deliverables complete. In-scope Build VM rows and batch exclusions are managed on Overview — not on this help page."
+          title="Trigger 1 — SB/ITL milestones marked complete"
+          description="Fires when the Conversion team marks SB completed or ITL completed. In-scope Build VM rows and batch exclusions are managed on Overview — not on this help page."
           systemSteps={TRIGGER1_STEPS}
           readOnlyNote={READ_ONLY}
           lastFired={t1Fired}

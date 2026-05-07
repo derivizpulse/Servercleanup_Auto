@@ -7,6 +7,8 @@ import type {
   BlobRow,
   DatabaseRow,
   DbAction,
+  OperationJob,
+  OperationKind,
   ToastItem,
   ToastVariant,
 } from "../types";
@@ -48,6 +50,17 @@ const trigger1Filter = (db: DatabaseRow) =>
   db.environment === "Build VM" && db.restoredByStaging;
 
 const csEnvs = new Set<DatabaseRow["environment"]>(["SB", "ITL"]);
+
+function normalizeLegacyDeliverableStatus(db: DatabaseRow): DatabaseRow {
+  const legacy = db.deliverableStatus as string | null;
+  if (legacy !== "SB/ITL Completed") return db;
+  const nameU = db.name.toUpperCase();
+  const nextStatus =
+    db.environment === "ITL" || nameU.includes("_ITL")
+      ? ("ITL Completed" as const)
+      : ("SB Completed" as const);
+  return { ...db, deliverableStatus: nextStatus };
+}
 
 function summarizeTrigger2(
   next: DatabaseRow[],
@@ -102,6 +115,21 @@ interface DerivizState {
   lastTrigger2DbIds: string[];
   lastTrigger2Summary: string;
 
+  /** Long-running operations track (backup / delete / etc.) */
+  operationJobs: OperationJob[];
+  enqueueOperation: (p: {
+    dbId: string;
+    dbName: string;
+    server: string;
+    kind: OperationKind;
+    batchId?: string;
+  }) => string;
+  tickOperations: () => void;
+  dismissOperation: (jobId: string) => void;
+  /** Queued → cancel; running → stop. Delete jobs only appear under Overview → Deleted when the job completes. */
+  cancelOrStopOperation: (jobId: string) => void;
+  clearSucceededOperations: () => void;
+
   setExcluded: (id: string, value: boolean) => void;
   scheduleDeletionByDate: (id: string, deletionDateIso: string) => void;
   deleteNow: (id: string) => void;
@@ -130,9 +158,9 @@ export const useDerivizStore = create<DerivizState>()((set, get) => {
   };
 
   return {
-    databases: initialDatabases.map((d) => ({ ...d })),
+    databases: initialDatabases.map((d) => normalizeLegacyDeliverableStatus({ ...d })),
     blobs: initialBlobs.map((b) => ({ ...b })),
-    excludedIds: ["db-7", "db-8"],
+    excludedIds: ["db-7", "db-8", "db-9"],
     deletedIds: ["db-10", "db-14"],
     deletedAtById: {
       "db-10": addDaysIso(new Date(), -4),
@@ -156,7 +184,133 @@ export const useDerivizStore = create<DerivizState>()((set, get) => {
     lastTrigger1DbIds: ["db-1", "db-2"],
     lastTrigger2DbIds: [],
     lastTrigger2Summary:
-      "Last run: _LIVE → Backup & delete (+30d) · Build VM → Delete (+5d) · SB/ITL → Scheduled delete (+7d), excluding opted-out DBs.",
+      "Last run: _LIVE → Backup & delete (+30d) · Build VM → Delete (+5d) · SB and ITL → Scheduled delete (+7d), excluding opted-out DBs.",
+
+    operationJobs: [],
+
+    enqueueOperation: ({ dbId, dbName, server, kind, batchId }) => {
+      const id = newId();
+      const now = new Date().toISOString();
+      const job: OperationJob = {
+        id,
+        dbId,
+        dbName,
+        server,
+        kind,
+        status: "queued",
+        progress: 0,
+        message: "Queued…",
+        startedAt: now,
+        updatedAt: now,
+        batchId,
+      };
+      set((s) => ({ operationJobs: [job, ...s.operationJobs].slice(0, 100) }));
+      return id;
+    },
+
+    tickOperations: () => {
+      const now = new Date().toISOString();
+      set((s) => {
+        const completedDeleteDbIds: { id: string; at: string }[] = [];
+        const operationJobs = s.operationJobs.map((job) => {
+          if (
+            job.status === "succeeded" ||
+            job.status === "failed" ||
+            job.status === "cancelled"
+          )
+            return job;
+          if (job.status === "queued") {
+            return {
+              ...job,
+              status: "running" as const,
+              progress: 4,
+              message: "Starting…",
+              updatedAt: now,
+            };
+          }
+          const bump = Math.min(
+            24,
+            Math.max(5, Math.round((100 - job.progress) * 0.11 + Math.random() * 10))
+          );
+          const progress = Math.min(100, job.progress + bump);
+          const label =
+            job.kind === "delete"
+              ? `Deleting database… ${progress}%`
+              : job.kind === "backup"
+                ? `Backing up… ${progress}%`
+                : job.kind === "backup_and_delete"
+                  ? `Backup, then delete… ${progress}%`
+                  : job.kind === "schedule_delete"
+                    ? `Applying schedule… ${progress}%`
+                    : job.kind === "reschedule"
+                      ? `Updating deletion date… ${progress}%`
+                      : `Applying… ${progress}%`;
+          if (progress >= 100) {
+            if (job.kind === "delete" || job.kind === "backup_and_delete") {
+              completedDeleteDbIds.push({ id: job.dbId, at: now });
+            }
+            return {
+              ...job,
+              progress: 100,
+              status: "succeeded" as const,
+              message: "Completed",
+              updatedAt: now,
+            };
+          }
+          return {
+            ...job,
+            progress,
+            status: "running" as const,
+            message: label,
+            updatedAt: now,
+          };
+        });
+
+        let deletedIds = s.deletedIds;
+        let deletedAtById = s.deletedAtById;
+        if (completedDeleteDbIds.length > 0) {
+          deletedAtById = { ...s.deletedAtById };
+          for (const { id, at } of completedDeleteDbIds) {
+            if (!deletedIds.includes(id)) {
+              deletedIds = [...deletedIds, id];
+              deletedAtById[id] = at;
+            }
+          }
+        }
+        return { operationJobs, deletedIds, deletedAtById };
+      });
+    },
+
+    dismissOperation: (jobId) =>
+      set((s) => ({
+        operationJobs: s.operationJobs.filter((j) => j.id !== jobId),
+      })),
+
+    cancelOrStopOperation: (jobId) => {
+      const now = new Date().toISOString();
+      set((s) => {
+        const job = s.operationJobs.find((j) => j.id === jobId);
+        if (!job || (job.status !== "queued" && job.status !== "running")) return s;
+        const message =
+          job.status === "queued" ? "Cancelled before start" : "Stopped by user";
+        const operationJobs = s.operationJobs.map((j) =>
+          j.id === jobId
+            ? {
+                ...j,
+                status: "cancelled" as const,
+                message,
+                updatedAt: now,
+              }
+            : j
+        );
+        return { operationJobs };
+      });
+    },
+
+    clearSucceededOperations: () =>
+      set((s) => ({
+        operationJobs: s.operationJobs.filter((j) => j.status !== "succeeded"),
+      })),
 
     setExcluded: (id, value) =>
       set((s) => {
@@ -222,23 +376,31 @@ export const useDerivizStore = create<DerivizState>()((set, get) => {
         };
       });
       pushToast("Deletion date updated.", "info");
+      const db = get().databases.find((d) => d.id === id);
+      get().enqueueOperation({
+        dbId: id,
+        dbName: db?.name ?? id,
+        server: db?.server ?? "—",
+        kind: "schedule_delete",
+      });
     },
 
     deleteNow: (id) => {
-      const deletedAt = new Date().toISOString();
-      const entry = makeActivityEntry(get, "Deleted immediately (manual)", {
+      const db = get().databases.find((d) => d.id === id);
+      get().enqueueOperation({
+        dbId: id,
+        dbName: db?.name ?? id,
+        server: db?.server ?? "—",
+        kind: "delete",
+      });
+      const entry = makeActivityEntry(get, "Deletion requested (manual)", {
         dbId: id,
         category: "manual",
       });
       set((s) => ({
-        deletedIds: s.deletedIds.includes(id) ? s.deletedIds : [...s.deletedIds, id],
-        deletedAtById: {
-          ...s.deletedAtById,
-          [id]: deletedAt,
-        },
         activityLog: [entry, ...s.activityLog].slice(0, 200),
       }));
-      get().addToast("Database deleted immediately.", "success");
+      get().addToast("Deletion started — track progress under Operations.", "info");
     },
 
     liftExclusion: (id) => {
@@ -437,20 +599,20 @@ export const useDerivizStore = create<DerivizState>()((set, get) => {
       set((st) => {
         const databases = st.databases.map((db) => {
           if (db.id !== dbId) return db;
-          if (action === "Retain") {
-            return {
-              ...db,
-              action: "Retain" as const,
-              actionDate: null,
-              deletionDate: null,
-            };
-          }
           if (action === "Delete") {
             return {
               ...db,
               action: "Delete" as const,
               actionDate: addDaysIso(now, 0),
               deletionDate: addDaysIso(now, 5),
+            };
+          }
+          if (action === "Backup") {
+            return {
+              ...db,
+              action: "Backup" as const,
+              actionDate: addDaysIso(now, 0),
+              autoBackedUp: true,
             };
           }
           if (action === "Backup & Delete") {
@@ -467,6 +629,19 @@ export const useDerivizStore = create<DerivizState>()((set, get) => {
         return { databases };
       });
       get().logActivity(`Manual override: ${action}`, dbId);
+      const row = get().databases.find((d) => d.id === dbId);
+      const kind: OperationKind =
+        action === "Backup"
+          ? "backup"
+          : action === "Backup & Delete"
+            ? "backup_and_delete"
+            : "delete";
+      get().enqueueOperation({
+        dbId,
+        dbName: row?.name ?? dbId,
+        server: row?.server ?? "—",
+        kind,
+      });
     },
 
     refreshClassification: (dbId) =>

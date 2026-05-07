@@ -7,9 +7,9 @@ import { ClassificationBadge, AutoBackedUpBadge } from "./Badge";
 import { Toggle } from "./Toggle";
 import { formatShortDate } from "../lib/classify";
 
-const overrides: { value: "Retain" | "Delete" | "Backup & Delete"; label: string }[] = [
-  { value: "Retain",          label: "Retain" },
+const overrides: { value: "Delete" | "Backup" | "Backup & Delete"; label: string }[] = [
   { value: "Delete",          label: "Delete" },
+  { value: "Backup",          label: "Backup" },
   { value: "Backup & Delete", label: "Backup & Delete" },
 ];
 
@@ -122,15 +122,16 @@ export function DBDetailSlideout({ dbId, onClose }: { dbId: string | null; onClo
               <select
                 className="c-select w-full"
                 value={
-                  ["Retain", "Delete", "Backup & Delete"].includes(db.action)
+                  ["Delete", "Backup", "Backup & Delete"].includes(db.action)
                     ? db.action
-                    : "Retain"
+                    : ""
                 }
                 onChange={(e) => {
-                  const v = e.target.value as "Retain" | "Delete" | "Backup & Delete";
+                  const v = e.target.value as "Delete" | "Backup" | "Backup & Delete";
                   setManual(db.id, v);
                 }}
               >
+                <option value="" disabled>Select action…</option>
                 {overrides.map((o) => (
                   <option key={o.value} value={o.value}>{o.label}</option>
                 ))}

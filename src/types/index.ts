@@ -12,16 +12,17 @@ export type Classification = "Account" | "Conversion" | "Live" | "Ungrouped";
 export type DbAction =
   | "None"
   | "Delete"
+  | "Backup"
   | "Backup & Delete"
-  | "Scheduled Delete"
-  | "Retain";
+  | "Scheduled Delete";
 
 /** Which automation trigger is responsible for this row */
 export type DbTrigger = "Trigger 1" | "Trigger 2" | "None";
 
 /** Deliverable / conversion status label shown in the table */
 export type DeliverableStatus =
-  | "SB/ITL Completed"
+  | "SB Completed"
+  | "ITL Completed"
   | "LIVE Completed"
   | null;
 
@@ -67,6 +68,38 @@ export interface ActivityEntry {
   server?: string;
   /** e.g. trigger, delete, override, system */
   category?: "system" | "trigger" | "manual" | "automation";
+}
+
+/** Long-running user-initiated work (backup, delete, etc.) — shown on Operations */
+export type OperationKind =
+  | "backup"
+  | "delete"
+  | "backup_and_delete"
+  | "reschedule"
+  | "schedule_delete";
+
+export type OperationStatus =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelled";
+
+export interface OperationJob {
+  id: string;
+  dbId: string;
+  dbName: string;
+  server: string;
+  kind: OperationKind;
+  status: OperationStatus;
+  /** 0–100 */
+  progress: number;
+  message: string;
+  startedAt: string;
+  updatedAt: string;
+  error?: string;
+  /** Optional batch id when many DBs were actioned together */
+  batchId?: string;
 }
 
 export interface BlobRow {

@@ -84,8 +84,8 @@ export function Settings() {
             </p>
             <ul className="ml-4 mt-1.5 list-disc space-y-1" style={{ color: "#5D6F7E" }}>
               <li>
-                The <strong>trigger event time</strong> (e.g. when “SB/ITL deliverables marked
-                complete” or when “conversion marked as implemented”),
+                The <strong>trigger event time</strong> (e.g. when “SB completed” or “ITL completed”
+                is marked, or when “conversion marked as implemented”),
               </li>
               <li>Or a <strong>user action</strong> in the portal (override, mark excluded, etc.).</li>
             </ul>
@@ -119,7 +119,7 @@ export function Settings() {
               Triggers in one line
             </h3>
             <p style={{ color: "#5D6F7E" }}>
-              <strong>Trigger 1 — SB/ITL deliverables complete.</strong> Staging Restorer
+              <strong>Trigger 1 — SB completed / ITL completed.</strong> Staging Restorer
               “minified” DBs in Build VM from blob; relevance is for destination push. Plan: delete
               those VM restores and matching blob backup files within 5 days; user can{" "}
               <strong>exclude</strong> retainers in the portal.

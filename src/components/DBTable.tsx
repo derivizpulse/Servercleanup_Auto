@@ -15,7 +15,7 @@ const envOptions: (SourceEnvironment | "All")[] = [
 ];
 const classOptions = ["All", "Account", "Conversion", "Live", "Ungrouped"] as const;
 const actionOptions = [
-  "All", "None", "Delete", "Backup & Delete", "Scheduled Delete", "Retain",
+  "All", "None", "Delete", "Backup & Delete", "Scheduled Delete",
 ] as const;
 
 export function DBTable({

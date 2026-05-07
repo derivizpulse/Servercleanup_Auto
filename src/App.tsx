@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import CfTopBar from "./components/careflow/CfTopBar";
 import {
   CfSidebar,
@@ -8,9 +8,12 @@ import {
 import { ToastContainer } from "./components/Toast";
 import { Overview } from "./pages/Overview";
 import { ServerHealth } from "./pages/ServerHealth";
+import { Operations } from "./pages/Operations";
+import { useDerivizStore } from "./store/useDerivizStore";
 
-type AppNavTab = "Overview" | "Server Health";
-const TABS: AppNavTab[] = ["Server Health", "Overview"];
+type AppNavTab = "Overview" | "Server Health" | "Operations";
+/** Order: server status first, then core workflows. All tabs wrap on small screens so nothing is hidden off-screen. */
+const TABS: AppNavTab[] = ["Server Health", "Overview", "Operations"];
 
 const SUITE_TITLES: Record<SuiteModuleId, string> = {
   "prac-list":   "Prac List",
@@ -54,6 +57,14 @@ export default function App() {
 
   const showDeriviz = activeModule === "srv-clean";
 
+  useEffect(() => {
+    if (!showDeriviz) return;
+    const id = window.setInterval(() => {
+      useDerivizStore.getState().tickOperations();
+    }, 450);
+    return () => clearInterval(id);
+  }, [showDeriviz]);
+
   function handleServerHealthCleanUp(server: string) {
     setActiveTab("Overview");
     setOverviewServerFilterRequest({ server, token: Date.now() });
@@ -80,7 +91,10 @@ export default function App() {
               }}
             >
               <div className="w-full min-w-0 px-3 sm:px-4 md:px-5 lg:px-6">
-                <nav className="flex" aria-label="Page tabs">
+                <nav
+                  className="flex flex-wrap gap-x-0.5 gap-y-1"
+                  aria-label="Page tabs"
+                >
                   {TABS.map((tab) => {
                     const isActive = activeTab === tab;
                     return (
@@ -88,7 +102,7 @@ export default function App() {
                         key={tab}
                         type="button"
                         onClick={() => setActiveTab(tab)}
-                        className="relative px-4 py-2.5 text-[12px] font-medium transition-colors focus:outline-none"
+                        className="relative shrink-0 px-4 py-2.5 text-[12px] font-medium transition-colors focus:outline-none"
                         style={{
                           color: isActive ? "#007A8F" : "#5D6F7E",
                           borderBottom: isActive
@@ -123,6 +137,7 @@ export default function App() {
               {activeTab === "Server Health" && (
                 <ServerHealth onCleanUpServer={handleServerHealthCleanUp} />
               )}
+              {activeTab === "Operations" && <Operations />}
             </div>
           </>
         ) : (
