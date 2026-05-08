@@ -24,6 +24,10 @@ function daysUntil(iso: string | null, todayIso: string): number | null {
   return daysBetween(todayIso, iso);
 }
 
+function isoDateOnly(value: string): string {
+  return new Date(value).toISOString().slice(0, 10);
+}
+
 /** Reschedule / schedule deletion date pickers: earliest tomorrow, latest today + 2 calendar months. */
 function getDeletionScheduleDateBounds(): { minIso: string; maxIso: string } {
   const today = new Date();
@@ -104,6 +108,8 @@ function formatAsOf(iso: string): string {
 /** Effective status label for each row */
 function rowStatus(db: ReturnType<typeof useDerivizStore.getState>["databases"][0], excluded: boolean): string {
   if (excluded) return "Excluded";
+  const nameU = db.name.toUpperCase();
+  if (db.classification === "Live" || nameU.includes("_LIVE")) return "Backup & Delete";
   if (db.action === "Delete" || db.action === "Scheduled Delete") return "Pending Deletion";
   if (db.action === "Backup & Delete") return "Backup & Delete";
   if (db.action === "Backup") return "Backup";
@@ -764,7 +770,7 @@ export function Overview({
   const [conversionFilter, setConversionFilter] = useState("All Conversions");
   const [classFilter, setClassFilter]   = useState("All classifications");
   const [statusFilter, setStatusFilter] = useState("All statuses");
-  const [sortColumn, setSortColumn] = useState<SortableColumn>("name");
+  const [sortColumn, setSortColumn] = useState<SortableColumn>("actionDate");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [scheduleDbId, setScheduleDbId] = useState<string | null>(null);
   const [scheduleDate, setScheduleDate] = useState("");
@@ -803,6 +809,19 @@ export function Overview({
   }, [showLegendInfo]);
 
   const todayIso = nowIso.slice(0, 10);
+  const effectiveDeletedIds = useMemo(() => {
+    const next = new Set(deletedIds);
+    dbs.forEach((d) => {
+      if (next.has(d.id)) return;
+      if (excludedIds.includes(d.id)) return;
+      if (!d.deletionDate) return;
+      const status = rowStatus(d, false);
+      if (status !== "Pending Deletion" && status !== "Backup & Delete") return;
+      // Automated cleanup should remove due rows from active/pending view.
+      if (isoDateOnly(d.deletionDate) <= todayIso) next.add(d.id);
+    });
+    return Array.from(next);
+  }, [dbs, deletedIds, excludedIds, todayIso]);
 
   // unique servers
   const servers = useMemo(
@@ -849,7 +868,7 @@ export function Overview({
 
   // metrics
   const metrics = useMemo(() => {
-    const active = dbs.filter((d) => !deletedIds.includes(d.id));
+    const active = dbs.filter((d) => !effectiveDeletedIds.includes(d.id));
     const rangeDays = RANGE_DAYS[metricRange];
     const rangeStartMs = new Date(nowIso).getTime() - rangeDays * 86_400_000;
     const inRange = (iso: string | null) => {
@@ -858,13 +877,8 @@ export function Overview({
       return t >= rangeStartMs;
     };
 
-    const pendingDel = active.filter((d) =>
-      !excludedIds.includes(d.id) &&
-      (d.action === "Delete" || d.action === "Scheduled Delete")
-    );
-    const backupDel = active.filter((d) =>
-      !excludedIds.includes(d.id) && d.action === "Backup & Delete"
-    );
+    const pendingDel = active.filter((d) => rowStatus(d, excludedIds.includes(d.id)) === "Pending Deletion");
+    const backupDel = active.filter((d) => rowStatus(d, excludedIds.includes(d.id)) === "Backup & Delete");
     const excl = active.filter((d) => excludedIds.includes(d.id));
     const expiresToday = pendingDel.filter((d) => daysUntil(d.deletionDate, todayIso) === 0).length;
     const expiresIn24h = pendingDel.filter((d) => {
@@ -872,7 +886,7 @@ export function Overview({
       return n !== null && n <= 1;
     });
     const storageRecovered = dbs
-      .filter((d) => deletedIds.includes(d.id) && inRange(deletedAtById[d.id] ?? null))
+      .filter((d) => effectiveDeletedIds.includes(d.id) && inRange(deletedAtById[d.id] ?? nowIso))
       .reduce((a, b) => a + b.sizeGb, 0);
     const pendingCreatedInRange = pendingDel.filter((d) => inRange(d.actionDate)).length;
     const backupCreatedInRange = backupDel.filter((d) => inRange(d.actionDate)).length;
@@ -891,13 +905,13 @@ export function Overview({
       expiresIn24h,
       rangeDays,
     };
-  }, [dbs, excludedIds, deletedIds, deletedAtById, metricRange, nowIso, todayIso]);
+  }, [dbs, excludedIds, effectiveDeletedIds, deletedAtById, metricRange, nowIso, todayIso]);
 
   // filter rows by sub-tab
   const visibleRows = useMemo(() => {
-    let rows = dbs.filter((d) => !deletedIds.includes(d.id));
+    let rows = dbs.filter((d) => !effectiveDeletedIds.includes(d.id));
     if (subTab === "Deleted")
-      rows = dbs.filter((d) => deletedIds.includes(d.id));
+      rows = dbs.filter((d) => effectiveDeletedIds.includes(d.id));
 
     // search
     if (search.trim())
@@ -926,27 +940,25 @@ export function Overview({
     }
     // status filter
     if (statusFilter === "Pending Deletion")
-      rows = rows.filter((d) =>
-        !excludedIds.includes(d.id) &&
-        (d.action === "Delete" || d.action === "Scheduled Delete")
-      );
+      rows = rows.filter((d) => rowStatus(d, excludedIds.includes(d.id)) === "Pending Deletion");
     else if (statusFilter === "Backup & Delete")
-      rows = rows.filter((d) => !excludedIds.includes(d.id) && d.action === "Backup & Delete");
+      rows = rows.filter((d) => rowStatus(d, excludedIds.includes(d.id)) === "Backup & Delete");
     else if (statusFilter === "Backup")
-      rows = rows.filter((d) => !excludedIds.includes(d.id) && d.action === "Backup");
+      rows = rows.filter((d) => rowStatus(d, excludedIds.includes(d.id)) === "Backup");
     else if (statusFilter === "Excluded")
-      rows = rows.filter((d) => excludedIds.includes(d.id));
+      rows = rows.filter((d) => rowStatus(d, excludedIds.includes(d.id)) === "Excluded");
     else if (statusFilter === "Active")
-      rows = rows.filter((d) => !excludedIds.includes(d.id) && d.action === "None");
+      rows = rows.filter((d) => rowStatus(d, excludedIds.includes(d.id)) === "Active");
 
     return rows;
-  }, [dbs, deletedIds, excludedIds, subTab, search, serverFilter, accountFilter, conversionFilter, classFilter, statusFilter]);
+  }, [dbs, effectiveDeletedIds, excludedIds, subTab, search, serverFilter, accountFilter, conversionFilter, classFilter, statusFilter]);
 
   const sortedRows = useMemo(
     () => sortDatabases(visibleRows, sortColumn, sortDir, excludedIds),
     [visibleRows, sortColumn, sortDir, excludedIds]
   );
-  const showActionsColumn = subTab !== "Deleted";
+  // Keep row-level action buttons inside the detail slideout to reduce table noise.
+  const showActionsColumn = false;
 
   function setSort(key: SortableColumn) {
     if (key === sortColumn) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -1079,7 +1091,7 @@ export function Overview({
       >
         {SUB_TABS.map((t) => {
           const isActive = subTab === t;
-          const count = t === "Deleted" ? deletedIds.length : undefined;
+          const count = t === "Deleted" ? effectiveDeletedIds.length : undefined;
           return (
             <button
               key={t}
@@ -1542,7 +1554,10 @@ export function Overview({
                     const isExcluded   = excludedIds.includes(r.id);
                     const status       = rowStatus(r, isExcluded);
                     const statusStyle  = STATUS_STYLE[status] ?? STATUS_STYLE["Active"];
-                    const countdown    = deletionCountdown(r.actionDate, r.deletionDate, r.windowDays, todayIso);
+                    const countdown =
+                      status === "Excluded"
+                        ? null
+                        : deletionCountdown(r.actionDate, r.deletionDate, r.windowDays, todayIso);
                     const daysLeft     = daysUntil(r.deletionDate, todayIso);
                     const isUrgent     = daysLeft !== null && daysLeft <= 1;
 
@@ -1585,12 +1600,12 @@ export function Overview({
 
                         {/* Account */}
                         <td className="cf-td align-middle" style={{ color: "#354756" }}>
-                          {r.accountName ?? "—"}
+                          {status === "Active" ? "—" : (r.accountName ?? "—")}
                         </td>
 
                         {/* Conversion */}
                         <td className="cf-td align-middle" style={{ color: "#5D6F7E" }}>
-                          {r.conversionName ?? "—"}
+                          {status === "Active" ? "—" : (r.conversionName ?? "—")}
                         </td>
 
                         {/* Server */}
@@ -1725,7 +1740,7 @@ export function Overview({
               style={{ borderTop: "1px solid #ECEFF2", background: "#F7F8FA" }}
             >
               <p className="text-[11px]" style={{ color: "#96A3AF" }}>
-                Showing {visibleRows.length} of {dbs.filter((d) => !deletedIds.includes(d.id)).length} databases
+                Showing {visibleRows.length} of {dbs.filter((d) => !effectiveDeletedIds.includes(d.id)).length} databases
               </p>
               {/* Classification quick legend */}
               <div className="flex items-center gap-3">

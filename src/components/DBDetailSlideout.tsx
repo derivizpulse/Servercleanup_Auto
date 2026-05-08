@@ -2,16 +2,17 @@
 // Uses CareFlow modal shadow, header bg (#F7F8FA), border (#ECEFF2),
 // body white, form label pattern, primary button token
 
+import { useEffect, useMemo, useState } from "react";
 import { useActivityForDb, useDerivizStore } from "../store/useDerivizStore";
 import { ClassificationBadge, AutoBackedUpBadge } from "./Badge";
 import { Toggle } from "./Toggle";
 import { formatShortDate } from "../lib/classify";
 
-const overrides: { value: "Delete" | "Backup" | "Backup & Delete"; label: string }[] = [
-  { value: "Delete",          label: "Delete" },
-  { value: "Backup",          label: "Backup" },
-  { value: "Backup & Delete", label: "Backup & Delete" },
-];
+type SlideoutAction =
+  | "lift_exclusion"
+  | "reschedule"
+  | "delete"
+  | "backup_delete";
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
@@ -28,10 +29,100 @@ export function DBDetailSlideout({ dbId, onClose }: { dbId: string | null; onClo
   const db        = useDerivizStore((s) => s.databases.find((d) => d.id === dbId) ?? null);
   const setExcluded = useDerivizStore((s) => s.setExcluded);
   const excluded  = useDerivizStore((s) => (dbId ? s.excludedIds.includes(dbId) : false));
+  const scheduleDeletionByDate = useDerivizStore((s) => s.scheduleDeletionByDate);
+  const liftExclusion = useDerivizStore((s) => s.liftExclusion);
   const setManual = useDerivizStore((s) => s.setManualOverride);
   const act       = useActivityForDb(dbId ?? "");
+  const { minScheduleIso, maxScheduleIso } = useMemo(() => {
+    const now = new Date();
+    const min = new Date(now);
+    min.setDate(min.getDate() + 1);
+    const max = new Date(now);
+    max.setMonth(max.getMonth() + 2);
+    return {
+      minScheduleIso: min.toISOString().slice(0, 10),
+      maxScheduleIso: max.toISOString().slice(0, 10),
+    };
+  }, []);
+  const [scheduleDate, setScheduleDate] = useState("");
+  useEffect(() => {
+    if (!db) return;
+    if (db.deletionDate) {
+      const iso = new Date(db.deletionDate).toISOString().slice(0, 10);
+      if (iso >= minScheduleIso && iso <= maxScheduleIso) {
+        setScheduleDate(iso);
+        return;
+      }
+    }
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    const fallback = d.toISOString().slice(0, 10);
+    if (fallback < minScheduleIso) setScheduleDate(minScheduleIso);
+    else if (fallback > maxScheduleIso) setScheduleDate(maxScheduleIso);
+    else setScheduleDate(fallback);
+  }, [db, minScheduleIso, maxScheduleIso]);
+  const isLiveRow = Boolean(db && (db.classification === "Live" || db.name.toUpperCase().includes("_LIVE")));
+  const status = excluded
+    ? "Excluded"
+    : isLiveRow
+      ? "Backup & Delete"
+      : db?.action === "Delete" || db?.action === "Scheduled Delete"
+      ? "Pending Deletion"
+      : db?.action === "Backup & Delete"
+        ? "Backup & Delete"
+        : db?.action === "Backup"
+          ? "Backup"
+          : "Active";
+  const [selectedAction, setSelectedAction] = useState<SlideoutAction>("reschedule");
+
+  const actionOptions: { value: SlideoutAction; label: string }[] =
+    status === "Excluded"
+      ? [{ value: "lift_exclusion", label: "Lift Exclusion" }]
+      : status === "Pending Deletion"
+        ? [
+            { value: "reschedule", label: "Reschedule" },
+            { value: "delete", label: "Delete" },
+            { value: "backup_delete", label: "Backup & Delete" },
+          ]
+        : status === "Backup & Delete"
+          ? [
+              { value: "reschedule", label: "Reschedule" },
+              { value: "delete", label: "Delete" },
+            ]
+          : [
+              { value: "delete", label: "Delete" },
+              { value: "backup_delete", label: "Backup & Delete" },
+            ];
+
+  useEffect(() => {
+    setSelectedAction(actionOptions[0]?.value ?? "reschedule");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, excluded]);
 
   if (!db) return null;
+
+  function applyActionWithDate(action: SlideoutAction) {
+    if (!db) return;
+    if (!scheduleDate) return;
+    if (scheduleDate < minScheduleIso || scheduleDate > maxScheduleIso) return;
+    const deletionDateIso = new Date(`${scheduleDate}T00:00:00.000Z`).toISOString();
+    if (action === "lift_exclusion") {
+      liftExclusion(db.id);
+      scheduleDeletionByDate(db.id, deletionDateIso);
+      return;
+    }
+    if (action === "delete") {
+      setManual(db.id, "Delete");
+      scheduleDeletionByDate(db.id, deletionDateIso);
+      return;
+    }
+    if (action === "backup_delete") {
+      setManual(db.id, "Backup & Delete");
+      scheduleDeletionByDate(db.id, deletionDateIso);
+      return;
+    }
+    scheduleDeletionByDate(db.id, deletionDateIso);
+  }
 
   return (
     <>
@@ -89,6 +180,8 @@ export function DBDetailSlideout({ dbId, onClose }: { dbId: string | null; onClo
           <div className="border-b px-4 py-4 space-y-3" style={{ borderColor: "#ECEFF2" }}>
             <p className="section-hdr">Action &amp; Schedule</p>
             <div className="grid grid-cols-2 gap-3">
+              <Field label="Account"       value={db.accountName ?? "—"} />
+              <Field label="Conversion"    value={db.conversionName ?? "—"} />
               <Field label="Action"        value={db.action} />
               <Field label="Action date"   value={db.actionDate   ? formatShortDate(db.actionDate)   : "—"} />
               <Field label="Deletion date" value={db.deletionDate ? formatShortDate(db.deletionDate) : "—"} />
@@ -112,31 +205,49 @@ export function DBDetailSlideout({ dbId, onClose }: { dbId: string | null; onClo
             </div>
           </div>
 
-          {/* Manual override */}
-          <div className="border-b px-4 py-4" style={{ borderColor: "#ECEFF2" }}>
-            <p className="section-hdr">Manual override</p>
+          {/* Quick actions */}
+          <div className="border-b px-4 py-4 space-y-3" style={{ borderColor: "#ECEFF2" }}>
+            <p className="section-hdr">Quick actions</p>
             <label className="flex flex-col gap-1">
               <span className="text-[11px]" style={{ color: "#5D6F7E" }}>
-                Assign action manually
+                Action
               </span>
               <select
                 className="c-select w-full"
-                value={
-                  ["Delete", "Backup", "Backup & Delete"].includes(db.action)
-                    ? db.action
-                    : ""
-                }
-                onChange={(e) => {
-                  const v = e.target.value as "Delete" | "Backup" | "Backup & Delete";
-                  setManual(db.id, v);
-                }}
+                value={selectedAction}
+                onChange={(e) => setSelectedAction(e.target.value as SlideoutAction)}
               >
-                <option value="" disabled>Select action…</option>
-                {overrides.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
+                {actionOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
                 ))}
               </select>
             </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px]" style={{ color: "#5D6F7E" }}>
+                Action date context (required)
+              </span>
+              <input
+                type="date"
+                className="c-input w-full"
+                min={minScheduleIso}
+                max={maxScheduleIso}
+                value={scheduleDate}
+                onChange={(e) => setScheduleDate(e.target.value)}
+              />
+              <span className="text-[10px]" style={{ color: "#96A3AF" }}>
+                Choose a date from tomorrow to two months ahead.
+              </span>
+            </label>
+            <button
+              type="button"
+              className="c-btn-primary"
+              disabled={!scheduleDate || scheduleDate < minScheduleIso || scheduleDate > maxScheduleIso}
+              onClick={() => applyActionWithDate(selectedAction)}
+            >
+              Apply action
+            </button>
           </div>
 
           {/* Activity log */}
@@ -166,8 +277,11 @@ export function DBDetailSlideout({ dbId, onClose }: { dbId: string | null; onClo
           className="flex h-[44px] shrink-0 items-center justify-end gap-2 px-4"
           style={{ borderTop: "1px solid #ECEFF2", background: "#FFFFFF" }}
         >
-          <button type="button" className="c-btn-outline" onClick={onClose}>
-            Close
+          <button type="button" className="c-btn-ghost" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="button" className="c-btn-primary" onClick={onClose}>
+            Save
           </button>
         </footer>
       </div>
