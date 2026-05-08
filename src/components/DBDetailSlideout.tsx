@@ -12,6 +12,7 @@ type SlideoutAction =
   | "lift_exclusion"
   | "reschedule"
   | "delete"
+  | "backup"
   | "backup_delete";
 
 function Field({ label, value }: { label: string; value: string }) {
@@ -62,7 +63,8 @@ export function DBDetailSlideout({ dbId, onClose }: { dbId: string | null; onClo
     else setScheduleDate(fallback);
   }, [db, minScheduleIso, maxScheduleIso]);
   const isLiveRow = Boolean(db && (db.classification === "Live" || db.name.toUpperCase().includes("_LIVE")));
-  const status = excluded
+  const [draftExcluded, setDraftExcluded] = useState(excluded);
+  const status = draftExcluded
     ? "Excluded"
     : isLiveRow
       ? "Backup & Delete"
@@ -74,6 +76,8 @@ export function DBDetailSlideout({ dbId, onClose }: { dbId: string | null; onClo
           ? "Backup"
           : "Active";
   const [selectedAction, setSelectedAction] = useState<SlideoutAction>("reschedule");
+  const [actionTouched, setActionTouched] = useState(false);
+  const [dateTouched, setDateTouched] = useState(false);
 
   const actionOptions: { value: SlideoutAction; label: string }[] =
     status === "Excluded"
@@ -91,6 +95,7 @@ export function DBDetailSlideout({ dbId, onClose }: { dbId: string | null; onClo
             ]
           : [
               { value: "delete", label: "Delete" },
+              { value: "backup", label: "Backup" },
               { value: "backup_delete", label: "Backup & Delete" },
             ];
 
@@ -98,6 +103,12 @@ export function DBDetailSlideout({ dbId, onClose }: { dbId: string | null; onClo
     setSelectedAction(actionOptions[0]?.value ?? "reschedule");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, excluded]);
+
+  useEffect(() => {
+    setDraftExcluded(excluded);
+    setActionTouched(false);
+    setDateTouched(false);
+  }, [excluded, dbId]);
 
   if (!db) return null;
 
@@ -116,12 +127,36 @@ export function DBDetailSlideout({ dbId, onClose }: { dbId: string | null; onClo
       scheduleDeletionByDate(db.id, deletionDateIso);
       return;
     }
+    if (action === "backup") {
+      setManual(db.id, "Backup");
+      return;
+    }
     if (action === "backup_delete") {
       setManual(db.id, "Backup & Delete");
       scheduleDeletionByDate(db.id, deletionDateIso);
       return;
     }
     scheduleDeletionByDate(db.id, deletionDateIso);
+  }
+
+  const canSaveAction =
+    !!scheduleDate &&
+    scheduleDate >= minScheduleIso &&
+    scheduleDate <= maxScheduleIso;
+  const exclusionChanged = draftExcluded !== excluded;
+  const actionChanged = !draftExcluded && (actionTouched || dateTouched);
+  const canSave = exclusionChanged || (actionChanged && canSaveAction);
+
+  function handleSave() {
+    if (!db) return;
+    if (!canSave) return;
+    if (exclusionChanged) {
+      setExcluded(db.id, draftExcluded);
+    }
+    if (actionChanged && canSaveAction) {
+      applyActionWithDate(selectedAction);
+    }
+    onClose();
   }
 
   return (
@@ -201,53 +236,63 @@ export function DBDetailSlideout({ dbId, onClose }: { dbId: string | null; onClo
                   This database will be skipped in trigger runs.
                 </p>
               </div>
-              <Toggle on={excluded} onChange={(v) => setExcluded(db.id, v)} ariaLabel="Exclude" />
+              <Toggle on={draftExcluded} onChange={(v) => setDraftExcluded(v)} ariaLabel="Exclude" />
             </div>
           </div>
 
           {/* Quick actions */}
           <div className="border-b px-4 py-4 space-y-3" style={{ borderColor: "#ECEFF2" }}>
             <p className="section-hdr">Quick actions</p>
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px]" style={{ color: "#5D6F7E" }}>
-                Action
-              </span>
-              <select
-                className="c-select w-full"
-                value={selectedAction}
-                onChange={(e) => setSelectedAction(e.target.value as SlideoutAction)}
-              >
-                {actionOptions.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px]" style={{ color: "#5D6F7E" }}>
-                Action date context (required)
-              </span>
-              <input
-                type="date"
-                className="c-input w-full"
-                min={minScheduleIso}
-                max={maxScheduleIso}
-                value={scheduleDate}
-                onChange={(e) => setScheduleDate(e.target.value)}
-              />
-              <span className="text-[10px]" style={{ color: "#96A3AF" }}>
-                Choose a date from tomorrow to two months ahead.
-              </span>
-            </label>
-            <button
-              type="button"
-              className="c-btn-primary"
-              disabled={!scheduleDate || scheduleDate < minScheduleIso || scheduleDate > maxScheduleIso}
-              onClick={() => applyActionWithDate(selectedAction)}
+            <div
+              className={draftExcluded ? "pointer-events-none opacity-60" : ""}
+              aria-disabled={draftExcluded}
             >
-              Apply action
-            </button>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px]" style={{ color: "#5D6F7E" }}>
+                  Action
+                </span>
+                <select
+                  className="c-select w-full"
+                  disabled={draftExcluded}
+                  value={selectedAction}
+                  onChange={(e) => {
+                    setSelectedAction(e.target.value as SlideoutAction);
+                    setActionTouched(true);
+                  }}
+                >
+                  {actionOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="mt-3 flex flex-col gap-1">
+                <span className="text-[11px]" style={{ color: "#5D6F7E" }}>
+                  Action date context (required)
+                </span>
+                <input
+                  type="date"
+                  className="c-input w-full"
+                  disabled={draftExcluded}
+                  min={minScheduleIso}
+                  max={maxScheduleIso}
+                  value={scheduleDate}
+                  onChange={(e) => {
+                    setScheduleDate(e.target.value);
+                    setDateTouched(true);
+                  }}
+                />
+                <span className="text-[10px]" style={{ color: "#96A3AF" }}>
+                  Choose a date from tomorrow to two months ahead.
+                </span>
+              </label>
+            </div>
+            {draftExcluded && (
+              <p className="text-[11px]" style={{ color: "#96A3AF" }}>
+                Turn off Exclusion to enable actions.
+              </p>
+            )}
           </div>
 
           {/* Activity log */}
@@ -280,7 +325,7 @@ export function DBDetailSlideout({ dbId, onClose }: { dbId: string | null; onClo
           <button type="button" className="c-btn-ghost" onClick={onClose}>
             Cancel
           </button>
-          <button type="button" className="c-btn-primary" onClick={onClose}>
+          <button type="button" className="c-btn-primary" disabled={!canSave} onClick={handleSave}>
             Save
           </button>
         </footer>
