@@ -83,13 +83,7 @@ export default function App() {
       >
         {showDeriviz ? (
           <>
-            <div
-              className="sticky top-[30px] z-[150] w-full min-w-0 bg-white"
-              style={{
-                borderBottom: "1px solid #ECEFF2",
-                boxShadow: "0 1px 0 0 rgba(13,22,29,0.06)",
-              }}
-            >
+            <div className="sticky top-[30px] z-[150] w-full min-w-0 border-b border-cf-border-soft bg-white shadow-card">
               <div className="w-full min-w-0 px-3 sm:px-4 md:px-5 lg:px-6">
                 <nav
                   className="flex flex-wrap gap-x-0.5 gap-y-1"
@@ -102,22 +96,12 @@ export default function App() {
                         key={tab}
                         type="button"
                         onClick={() => setActiveTab(tab)}
-                        className="relative shrink-0 px-4 py-2.5 text-[12px] font-medium transition-colors focus:outline-none"
-                        style={{
-                          color: isActive ? "#007A8F" : "#5D6F7E",
-                          borderBottom: isActive
-                            ? "2px solid #007A8F"
-                            : "2px solid transparent",
-                          marginBottom: "-1px",
-                        }}
-                        onMouseEnter={(e) => {
-                          if (!isActive)
-                            (e.currentTarget as HTMLButtonElement).style.color = "#354756";
-                        }}
-                        onMouseLeave={(e) => {
-                          if (!isActive)
-                            (e.currentTarget as HTMLButtonElement).style.color = "#5D6F7E";
-                        }}
+                        className={`relative shrink-0 px-4 py-2.5 text-[12px] font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cf-primary ${
+                          isActive
+                            ? "border-b-2 border-cf-primary text-cf-primary"
+                            : "border-b-2 border-transparent text-cf-secondary hover:text-cf-text"
+                        }`}
+                        style={{ marginBottom: "-1px" }}
                       >
                         {tab}
                       </button>

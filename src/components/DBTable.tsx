@@ -149,7 +149,7 @@ export function DBTable({
                     />
                   </th>
                 )}
-                {["DB Name", "Environment", "Size", "Classification", "Action", "Action Date", "Deletion Date", "Exclude"].map((h) => (
+                {["DB Name", "Environment", "Size", "Classification", "Action", "Triggered Date", "Deletion Date", "Exclude"].map((h) => (
                   <th key={h} className="cf-th">{h}</th>
                 ))}
                 {enterprise && <th className="cf-th w-8" aria-label="Row actions" />}

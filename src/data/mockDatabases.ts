@@ -68,12 +68,12 @@ export const initialDatabases: DatabaseRow[] = [
   // Extra LIVE excluded case: still inside 30-day frame, useful to test "Lift Exclusion" reschedule prompt.
   row("db-19", "CarePlusOrtho_C1_LIVE_2",       "Aquila-2",  "Aquila",    27,   "Backup & Delete", "Trigger 2", "LIVE Completed",     d(-20), d(10),  30, false, true),
   // ── Active / No action ──
-  row("db-10", "LakesideDental_C4",             "Raven-2",   "Raven",     8.2,  "None",            "None",      null,                 null,   null,   null, false),
+  row("db-10", "LakesideDental_C4",             "Raven-2",   "Raven",     8.2,  "None",            "None",      "SB Completed",       null,   null,   null, false),
   row("db-11", "LakesideDental_C4_SB",          "Aquila-3",  "Build VM",  15,   "None",            "None",      null,                 null,   null,   null, true),
-  row("db-12", "EastsideSmiles_C2",             "Aquila-2",  "Aquila",    3.1,  "None",            "None",      null,                 null,   null,   null, false),
-  row("db-13", "EastsideSmiles_C2_ITL",         "Aquila-3",  "Build VM",  22,   "None",            "None",      null,                 null,   null,   null, true),
+  row("db-12", "EastsideSmiles_C2",             "Aquila-2",  "Aquila",    3.1,  "None",            "None",      "SB Completed",       null,   null,   null, false),
+  row("db-13", "EastsideSmiles_C2_ITL",         "Aquila-3",  "Build VM",  22,   "None",            "None",      "ITL Completed",      null,   null,   null, true),
   row("db-14", "MetroDentalGroup_C5_LIVE",      "Raven-3",   "Aquila",    200,  "None",            "None",      null,                 null,   null,   null, false),
-  row("db-15", "MetroDentalGroup_C5",           "Raven-1",   "Raven",     0.5,  "None",            "None",      null,                 null,   null,   null, false),
+  row("db-15", "MetroDentalGroup_C5",           "Raven-1",   "Raven",     0.5,  "None",            "None",      "ITL Completed",      null,   null,   null, false),
   row("db-16", "WholeDentalWellness_C1_SB",     "SB-1",      "SB",        40,   "Scheduled Delete","Trigger 1", "SB Completed",       d(-3),  d(7),   7,  false),
   row("db-17", "WholeDentalWellness_C1_SB_2",    "SB-2",      "SB",        28,   "Scheduled Delete","Trigger 1", "SB Completed",       d(-3),  d(7),   7,  false),
   row("db-18", "WholeDentalWellness_C1_ITL",    "ITL-1",     "ITL",       19,   "Scheduled Delete","Trigger 1", "ITL Completed",      d(-96), d(7),   7,  false),

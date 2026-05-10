@@ -177,4 +177,49 @@
     color: var(--gs-60);
     border-radius: var(--radius-md) var(--radius-md) 0 0;
   }
+
+  /* Modal chrome — matches CareFlow elevation + greyscale header strip */
+  .cf-modal-overlay {
+    background: rgba(30, 34, 40, 0.35);
+  }
+  .cf-modal-panel {
+    border: 1px solid var(--gs-10);
+    border-radius: var(--radius-lg);
+    background: #ffffff;
+    box-shadow:
+      0 4px 12px rgba(13, 22, 29, 0.24),
+      0 12px 28px rgba(13, 22, 29, 0.12);
+  }
+  .cf-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 16px;
+    background: var(--gs-5);
+    border-bottom: 1px solid var(--gs-10);
+  }
+  .cf-modal-title {
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 18px;
+    color: var(--gs-60);
+  }
+  .cf-modal-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--gs-10);
+  }
+
+  /* Uppercase field label (filters, forms) */
+  .cf-field-label {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--gs-60);
+  }
 }

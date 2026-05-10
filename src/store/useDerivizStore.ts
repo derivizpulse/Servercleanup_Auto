@@ -62,6 +62,26 @@ function normalizeLegacyDeliverableStatus(db: DatabaseRow): DatabaseRow {
   return { ...db, deliverableStatus: nextStatus };
 }
 
+function isSbOrItlCompleted(status: DatabaseRow["deliverableStatus"]): boolean {
+  return status === "SB Completed" || status === "ITL Completed";
+}
+
+function applyDefaultDeleteForCompletedDeliverable(
+  db: DatabaseRow,
+  now: Date
+): DatabaseRow {
+  if (db.action !== "None") return db;
+  if (!isSbOrItlCompleted(db.deliverableStatus)) return db;
+  return {
+    ...db,
+    action: "Delete",
+    trigger: db.trigger === "None" ? "Trigger 1" : db.trigger,
+    actionDate: addDaysIso(now, 0),
+    deletionDate: addDaysIso(now, 5),
+    windowDays: 5,
+  };
+}
+
 function summarizeTrigger2(
   next: DatabaseRow[],
   prev: DatabaseRow[]
@@ -131,7 +151,11 @@ interface DerivizState {
   clearSucceededOperations: () => void;
 
   setExcluded: (id: string, value: boolean) => void;
-  scheduleDeletionByDate: (id: string, deletionDateIso: string) => void;
+  scheduleDeletionByDate: (
+    id: string,
+    deletionDateIso: string,
+    forcedAction?: "Delete" | "Backup & Delete" | "Scheduled Delete"
+  ) => void;
   deleteNow: (id: string) => void;
   liftExclusion: (id: string) => void;
   addToast: (message: string, variant: ToastVariant) => void;
@@ -156,9 +180,15 @@ export const useDerivizStore = create<DerivizState>()((set, get) => {
     }));
     scheduleToastDismiss({ dismissToast: (tid) => get().dismissToast(tid) }, id);
   };
+  const seedNow = new Date();
 
   return {
-    databases: initialDatabases.map((d) => normalizeLegacyDeliverableStatus({ ...d })),
+    databases: initialDatabases.map((d) =>
+      applyDefaultDeleteForCompletedDeliverable(
+        normalizeLegacyDeliverableStatus({ ...d }),
+        seedNow
+      )
+    ),
     blobs: initialBlobs.map((b) => ({ ...b })),
     excludedIds: ["db-7", "db-8", "db-9", "db-19"],
     deletedIds: ["db-10", "db-14"],
@@ -315,9 +345,17 @@ export const useDerivizStore = create<DerivizState>()((set, get) => {
     setExcluded: (id, value) =>
       set((s) => {
         const db = s.databases.find((d) => d.id === id);
+        const now = new Date();
         const next = new Set(s.excludedIds);
         if (value) next.add(id);
         else next.delete(id);
+        const databases = !value
+          ? s.databases.map((row) =>
+              row.id === id
+                ? applyDefaultDeleteForCompletedDeliverable(row, now)
+                : row
+            )
+          : s.databases;
         const logEntry: ActivityEntry = {
           id: newId(),
           at: new Date().toISOString(),
@@ -330,20 +368,22 @@ export const useDerivizStore = create<DerivizState>()((set, get) => {
           category: "manual",
         };
         return {
+          databases,
           excludedIds: Array.from(next),
           activityLog: [logEntry, ...s.activityLog].slice(0, 200),
         };
       }),
 
-    scheduleDeletionByDate: (id, deletionDateIso) => {
+    scheduleDeletionByDate: (id, deletionDateIso, forcedAction) => {
       const now = new Date();
       const actionIso = addDaysIso(now, 0);
       set((s) => {
         const before = s.databases.find((d) => d.id === id);
         const databases = s.databases.map((db) => {
           if (db.id !== id) return db;
-          const action =
-            db.action === "Backup & Delete"
+          const action = forcedAction
+            ? forcedAction
+            : db.action === "Backup & Delete"
               ? ("Backup & Delete" as const)
               : db.action === "Delete"
                 ? ("Delete" as const)
@@ -404,6 +444,7 @@ export const useDerivizStore = create<DerivizState>()((set, get) => {
     },
 
     liftExclusion: (id) => {
+      const now = new Date();
       set((s) => {
         const db = s.databases.find((d) => d.id === id);
         const logEntry: ActivityEntry = {
@@ -419,7 +460,10 @@ export const useDerivizStore = create<DerivizState>()((set, get) => {
           excludedIds: s.excludedIds.filter((x) => x !== id),
           databases: s.databases.map((db) =>
             db.id === id
-              ? { ...db, action: "None" as const, actionDate: null, deletionDate: null }
+              ? applyDefaultDeleteForCompletedDeliverable(
+                  { ...db, action: "None" as const, actionDate: null, deletionDate: null },
+                  now
+                )
               : db
           ),
           activityLog: [logEntry, ...s.activityLog].slice(0, 200),
@@ -608,12 +652,8 @@ export const useDerivizStore = create<DerivizState>()((set, get) => {
             };
           }
           if (action === "Backup") {
-            return {
-              ...db,
-              action: "Backup" as const,
-              actionDate: addDaysIso(now, 0),
-              autoBackedUp: true,
-            };
+            // Backup is operational only: log + job queue. Do not change lifecycle action/dates.
+            return { ...db, autoBackedUp: true };
           }
           if (action === "Backup & Delete") {
             return {
@@ -628,20 +668,22 @@ export const useDerivizStore = create<DerivizState>()((set, get) => {
         });
         return { databases };
       });
-      get().logActivity(`Manual override: ${action}`, dbId);
-      const row = get().databases.find((d) => d.id === dbId);
-      const kind: OperationKind =
-        action === "Backup"
-          ? "backup"
-          : action === "Backup & Delete"
-            ? "backup_and_delete"
-            : "delete";
-      get().enqueueOperation({
-        dbId,
-        dbName: row?.name ?? dbId,
-        server: row?.server ?? "—",
-        kind,
-      });
+      get().logActivity(
+        action === "Backup" ? "Backup requested" : `Manual override: ${action}`,
+        dbId
+      );
+      // Manual override should not auto-execute destructive work immediately.
+      // Delete / Backup&Delete become scheduled lifecycle states and should only
+      // execute by due-date flow (or explicit Delete Now).
+      if (action === "Backup") {
+        const row = get().databases.find((d) => d.id === dbId);
+        get().enqueueOperation({
+          dbId,
+          dbName: row?.name ?? dbId,
+          server: row?.server ?? "—",
+          kind: "backup",
+        });
+      }
     },
 
     refreshClassification: (dbId) =>

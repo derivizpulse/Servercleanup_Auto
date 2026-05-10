@@ -40,9 +40,9 @@ export function Settings() {
         </p>
       </div>
 
-      {/* Product story — what Action date / Deletion date mean */}
+      {/* Product story — what Triggered date / Deletion date mean */}
       <div className="c-card">
-        <div className="c-card-header">What syncs, how we classify, and what “action date” means</div>
+        <div className="c-card-header">What syncs, how we classify, and what “triggered date” means</div>
         <div className="space-y-4 p-4 text-[12px] leading-relaxed" style={{ color: "#354756" }}>
           <section>
             <h3 className="mb-1.5 text-[12px] font-semibold" style={{ color: "#1E2228" }}>
@@ -75,10 +75,10 @@ export function Settings() {
 
           <section>
             <h3 className="mb-1.5 text-[12px] font-semibold" style={{ color: "#1E2228" }}>
-              How we define <em>action date</em> and <em>deletion date</em>
+              How we define <em>triggered date</em> and <em>deletion date</em>
             </h3>
             <p style={{ color: "#5D6F7E" }}>
-              <strong>Action date</strong> is the <strong>anchor in time</strong> when a lifecycle
+              <strong>Triggered date</strong> is the <strong>anchor in time</strong> when a lifecycle
               action is <strong>recorded</strong> in Deriviz — not when files are actually deleted
               on disk. Usually it is:
             </p>
@@ -91,7 +91,7 @@ export function Settings() {
             </ul>
             <p className="mt-2" style={{ color: "#5D6F7E" }}>
               <strong>Deletion date</strong> (and “scheduled delete on …”) is then derived as{" "}
-              <strong>action date + the policy window</strong> for that path, for example:
+              <strong>triggered date + the policy window</strong> for that path, for example:
             </p>
             <ul className="ml-4 mt-1.5 list-disc space-y-1" style={{ color: "#5D6F7E" }}>
               <li>
@@ -108,7 +108,7 @@ export function Settings() {
               </li>
             </ul>
             <p className="mt-2 rounded-[3px] border px-3 py-2 text-[11px]" style={{ background: "#F7F8FA", borderColor: "#ECEFF2", color: "#5D6F7E" }}>
-              <strong>Short version:</strong> action date = <em>when the schedule was created or the
+              <strong>Short version:</strong> triggered date = <em>when the schedule was created or the
               trigger fired</em>; deletion date = <em>the deadline the policy assigns</em> from
               that anchor. Exclusions in the portal override automation for the chosen databases.
             </p>
