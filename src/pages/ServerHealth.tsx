@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { matchesTeamFilter, type TeamFilter } from "../lib/teams";
 
 type HealthCard = {
   id: string;
@@ -131,8 +132,18 @@ function ServerCard({ s, onCleanUpServer }: { s: HealthCard; onCleanUpServer: (s
   );
 }
 
-export function ServerHealth({ onCleanUpServer }: { onCleanUpServer: (server: string) => void }) {
+export function ServerHealth({
+  teamFilter,
+  onCleanUpServer,
+}: {
+  teamFilter: TeamFilter;
+  onCleanUpServer: (server: string) => void;
+}) {
   const [servers, setServers] = useState<HealthCard[]>(INITIAL_SERVERS);
+  const visibleServers = useMemo(
+    () => servers.filter((server) => matchesTeamFilter(server.filterServer, teamFilter)),
+    [servers, teamFilter]
+  );
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -169,9 +180,18 @@ export function ServerHealth({ onCleanUpServer }: { onCleanUpServer: (server: st
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {servers.map((s) => (
-          <ServerCard key={s.id} s={s} onCleanUpServer={onCleanUpServer} />
-        ))}
+        {visibleServers.length === 0 ? (
+          <div
+            className="c-card col-span-full px-4 py-10 text-center text-[12px]"
+            style={{ color: "#5D6F7E" }}
+          >
+            No servers are assigned to this team.
+          </div>
+        ) : (
+          visibleServers.map((s) => (
+            <ServerCard key={s.id} s={s} onCleanUpServer={onCleanUpServer} />
+          ))
+        )}
       </div>
     </div>
   );

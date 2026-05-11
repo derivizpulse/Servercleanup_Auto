@@ -1,6 +1,7 @@
 // Deriviz — Operations: long-running backup / delete / schedule jobs with progress
 
 import { useMemo } from "react";
+import { matchesTeamFilter, type TeamFilter } from "../lib/teams";
 import { useDerivizStore } from "../store/useDerivizStore";
 import type { OperationJob, OperationKind, OperationStatus } from "../types";
 
@@ -31,8 +32,12 @@ function formatTime(iso: string) {
   }
 }
 
-export function Operations() {
+export function Operations({ teamFilter }: { teamFilter: TeamFilter }) {
   const jobs = useDerivizStore((s) => s.operationJobs);
+  const visibleJobs = useMemo(
+    () => jobs.filter((job) => matchesTeamFilter(job.server, teamFilter)),
+    [jobs, teamFilter]
+  );
   const dismissOperation = useDerivizStore((s) => s.dismissOperation);
   const cancelOrStopOperation = useDerivizStore((s) => s.cancelOrStopOperation);
   const clearSucceededOperations = useDerivizStore((s) => s.clearSucceededOperations);
@@ -40,12 +45,12 @@ export function Operations() {
   const stats = useMemo(() => {
     let active = 0;
     let done = 0;
-    for (const j of jobs) {
+    for (const j of visibleJobs) {
       if (j.status === "running" || j.status === "queued") active++;
       if (j.status === "succeeded") done++;
     }
     return { active, done };
-  }, [jobs]);
+  }, [visibleJobs]);
 
   return (
     <div className="flex min-h-0 flex-col gap-4" style={{ height: "calc(100svh - 6.5rem)", minHeight: 360 }}>
@@ -84,7 +89,7 @@ export function Operations() {
       >
         <div className="c-card-header shrink-0">Running & recent jobs</div>
 
-        {jobs.length === 0 ? (
+        {visibleJobs.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center px-6 py-16 text-center">
             <p className="text-[13px] font-medium" style={{ color: "#354756" }}>
               No operations yet
@@ -106,7 +111,7 @@ export function Operations() {
                 </tr>
               </thead>
               <tbody>
-                {jobs.map((job, i) => (
+                {visibleJobs.map((job, i) => (
                   <JobRow
                     key={job.id}
                     job={job}

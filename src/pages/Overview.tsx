@@ -5,6 +5,13 @@ import { DBDetailSlideout } from "../components/DBDetailSlideout";
 import { useDerivizStore } from "../store/useDerivizStore";
 import { formatShortDate } from "../lib/classify";
 import { cn } from "../lib/cn";
+import {
+  activityEntryMatchesTeam,
+  matchesTeamFilter,
+  serverGroup,
+  teamFilterLabel,
+  type TeamFilter,
+} from "../lib/teams";
 import type { DatabaseRow } from "../types";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -17,10 +24,6 @@ function daysBetween(a: string, b: string) {
   const aUtc = Date.parse(`${aDate}T00:00:00.000Z`);
   const bUtc = Date.parse(`${bDate}T00:00:00.000Z`);
   return Math.trunc((bUtc - aUtc) / 86_400_000);
-}
-
-function serverGroup(server: string): string {
-  return server.split("-")[0] ?? server;
 }
 
 function daysUntil(iso: string | null, todayIso: string): number | null {
@@ -489,9 +492,11 @@ function SearchableSelect({
 
 // ── main page ─────────────────────────────────────────────────────────────────
 export function Overview({
+  teamFilter,
   requestedServerFilter,
   onServerFilterApplied,
 }: {
+  teamFilter: TeamFilter;
   requestedServerFilter?: { server: string; token: number } | null;
   onServerFilterApplied?: () => void;
 }) {
@@ -554,6 +559,10 @@ export function Overview({
   }, [showLegendInfo]);
 
   const todayIso = nowIso.slice(0, 10);
+  const teamScopedDbs = useMemo(
+    () => dbs.filter((d) => matchesTeamFilter(d.server, teamFilter)),
+    [dbs, teamFilter]
+  );
   const effectiveDeletedIds = useMemo(() => {
     const next = new Set(deletedIds);
     dbs.forEach((d) => {
@@ -570,30 +579,51 @@ export function Overview({
 
   // unique servers
   const servers = useMemo(
-    () => ["All Servers", ...Array.from(new Set(dbs.map((d) => serverGroup(d.server))))],
-    [dbs]
+    () => ["All Servers", ...Array.from(new Set(teamScopedDbs.map((d) => serverGroup(d.server))))],
+    [teamScopedDbs]
   );
   const accounts = useMemo(
-    () => ["All Accounts", ...Array.from(new Set(dbs.map((d) => d.accountName).filter((x): x is string => Boolean(x))))],
-    [dbs]
+    () => [
+      "All Accounts",
+      ...Array.from(new Set(teamScopedDbs.map((d) => d.accountName).filter((x): x is string => Boolean(x)))),
+    ],
+    [teamScopedDbs]
   );
   const conversions = useMemo(() => {
     const scoped = accountFilter === "All Accounts"
-      ? dbs
-      : dbs.filter((d) => d.accountName === accountFilter);
+      ? teamScopedDbs
+      : teamScopedDbs.filter((d) => d.accountName === accountFilter);
     return [
       "All Conversions",
       ...Array.from(new Set(scoped.map((d) => d.conversionName).filter((x): x is string => Boolean(x)))),
     ];
-  }, [accountFilter, dbs]);
+  }, [accountFilter, teamScopedDbs]);
   const classificationOptions = ["All classifications", "Account", "Conversion", "Live", "Unmapped"];
   const statusOptions = ["All statuses", "Active", "Pending Deletion", "Backup & Delete", "Excluded"];
+  const scopedActivityLog = useMemo(
+    () => activityLog.filter((entry) => activityEntryMatchesTeam(entry, dbs, teamFilter)),
+    [activityLog, dbs, teamFilter]
+  );
+  const teamDeletedCount = useMemo(
+    () =>
+      effectiveDeletedIds.filter((id) => {
+        const db = dbs.find((d) => d.id === id);
+        return db ? matchesTeamFilter(db.server, teamFilter) : false;
+      }).length,
+    [dbs, effectiveDeletedIds, teamFilter]
+  );
 
   useEffect(() => {
     if (conversionFilter !== "All Conversions" && !conversions.includes(conversionFilter)) {
       setConversionFilter("All Conversions");
     }
   }, [conversionFilter, conversions]);
+
+  useEffect(() => {
+    if (serverFilter !== "All Servers" && !servers.includes(serverFilter)) {
+      setServerFilter("All Servers");
+    }
+  }, [serverFilter, servers, teamFilter]);
 
   useEffect(() => {
     if (!requestedServerFilter) return;
@@ -613,7 +643,7 @@ export function Overview({
 
   // metrics
   const metrics = useMemo(() => {
-    const active = dbs.filter((d) => !effectiveDeletedIds.includes(d.id));
+    const active = teamScopedDbs.filter((d) => !effectiveDeletedIds.includes(d.id));
     const rangeDays = RANGE_DAYS[metricRange];
     const rangeStartMs = new Date(nowIso).getTime() - rangeDays * 86_400_000;
     const inRange = (iso: string | null) => {
@@ -630,7 +660,7 @@ export function Overview({
       const n = daysUntil(d.deletionDate, todayIso);
       return n !== null && n <= 1;
     });
-    const storageRecovered = dbs
+    const storageRecovered = teamScopedDbs
       .filter((d) => effectiveDeletedIds.includes(d.id) && inRange(deletedAtById[d.id] ?? nowIso))
       .reduce((a, b) => a + b.sizeGb, 0);
     const pendingCreatedInRange = pendingDel.filter((d) => inRange(d.actionDate)).length;
@@ -650,13 +680,13 @@ export function Overview({
       expiresIn24h,
       rangeDays,
     };
-  }, [dbs, excludedIds, effectiveDeletedIds, deletedAtById, metricRange, nowIso, todayIso]);
+  }, [teamScopedDbs, excludedIds, effectiveDeletedIds, deletedAtById, metricRange, nowIso, todayIso]);
 
   // filter rows by sub-tab
   const visibleRows = useMemo(() => {
-    let rows = dbs.filter((d) => !effectiveDeletedIds.includes(d.id));
+    let rows = teamScopedDbs.filter((d) => !effectiveDeletedIds.includes(d.id));
     if (subTab === "Deleted")
-      rows = dbs.filter((d) => effectiveDeletedIds.includes(d.id));
+      rows = teamScopedDbs.filter((d) => effectiveDeletedIds.includes(d.id));
 
     // search
     if (search.trim())
@@ -694,7 +724,7 @@ export function Overview({
       rows = rows.filter((d) => rowStatus(d, excludedIds.includes(d.id)) === "Active");
 
     return rows;
-  }, [dbs, effectiveDeletedIds, excludedIds, subTab, search, serverFilter, accountFilter, conversionFilter, classFilter, statusFilter]);
+  }, [teamScopedDbs, effectiveDeletedIds, excludedIds, subTab, search, serverFilter, accountFilter, conversionFilter, classFilter, statusFilter]);
 
   const sortedRows = useMemo(
     () => sortDatabases(visibleRows, sortColumn, sortDir, excludedIds),
@@ -852,7 +882,7 @@ export function Overview({
       <div className="shrink-0 flex border-b border-cf-border-soft bg-white">
         {SUB_TABS.map((t) => {
           const isActive = subTab === t;
-          const count = t === "Deleted" ? effectiveDeletedIds.length : undefined;
+          const count = t === "Deleted" ? teamDeletedCount : undefined;
           return (
             <button
               key={t}
@@ -909,6 +939,7 @@ export function Overview({
           <div className="shrink-0 flex flex-wrap items-center justify-between gap-2">
             <p className="text-[11px] text-cf-secondary">
               As of <span className="font-medium text-cf-text">{formatAsOf(nowIso)}</span>
+              <span className="text-cf-muted"> · {teamFilterLabel(teamFilter)}</span>
             </p>
             <div ref={legendRef} className="relative flex items-center gap-2">
               <span className="text-[11px] font-medium text-cf-secondary">Range</span>
@@ -1060,14 +1091,14 @@ export function Overview({
                 </tr>
               </thead>
               <tbody>
-                {activityLog.length === 0 && (
+                {scopedActivityLog.length === 0 && (
                   <tr>
                     <td colSpan={5} className="px-4 py-10 text-center text-[12px] text-cf-muted">
                       No activity yet.
                     </td>
                   </tr>
                 )}
-                {activityLog.map((a) => {
+                {scopedActivityLog.map((a) => {
                   const typeLabel =
                     a.category === "trigger" ? "Trigger"
                     : a.category === "system" ? "System"

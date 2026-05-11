@@ -6,9 +6,11 @@ import {
   type SuiteModuleId,
 } from "./components/careflow/CfSidebar";
 import { ToastContainer } from "./components/Toast";
+import { TeamFilterSelect } from "./components/TeamFilterSelect";
 import { Overview } from "./pages/Overview";
 import { ServerHealth } from "./pages/ServerHealth";
 import { Operations } from "./pages/Operations";
+import { DEFAULT_TEAM_FILTER, type TeamFilter } from "./lib/teams";
 import { useDerivizStore } from "./store/useDerivizStore";
 
 type AppNavTab = "Overview" | "Server Health" | "Operations";
@@ -54,6 +56,7 @@ export default function App() {
     server: string;
     token: number;
   } | null>(null);
+  const [teamFilter, setTeamFilter] = useState<TeamFilter>(DEFAULT_TEAM_FILTER);
 
   const showDeriviz = activeModule === "srv-clean";
 
@@ -84,7 +87,7 @@ export default function App() {
         {showDeriviz ? (
           <>
             <div className="sticky top-[30px] z-[150] w-full min-w-0 border-b border-cf-border-soft bg-white shadow-card">
-              <div className="w-full min-w-0 px-3 sm:px-4 md:px-5 lg:px-6">
+              <div className="flex w-full min-w-0 flex-wrap items-center justify-between gap-2 px-3 sm:px-4 md:px-5 lg:px-6">
                 <nav
                   className="flex flex-wrap gap-x-0.5 gap-y-1"
                   aria-label="Page tabs"
@@ -108,20 +111,25 @@ export default function App() {
                     );
                   })}
                 </nav>
+                <TeamFilterSelect value={teamFilter} onChange={setTeamFilter} />
               </div>
             </div>
 
             <div className="w-full min-w-0 p-3 sm:p-4 md:p-5 lg:p-6">
               {activeTab === "Overview"     && (
                 <Overview
+                  teamFilter={teamFilter}
                   requestedServerFilter={overviewServerFilterRequest}
                   onServerFilterApplied={() => setOverviewServerFilterRequest(null)}
                 />
               )}
               {activeTab === "Server Health" && (
-                <ServerHealth onCleanUpServer={handleServerHealthCleanUp} />
+                <ServerHealth
+                  teamFilter={teamFilter}
+                  onCleanUpServer={handleServerHealthCleanUp}
+                />
               )}
-              {activeTab === "Operations" && <Operations />}
+              {activeTab === "Operations" && <Operations teamFilter={teamFilter} />}
             </div>
           </>
         ) : (
