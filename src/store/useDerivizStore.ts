@@ -17,6 +17,19 @@ function newId(): string {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+/** Backup artifact path shown in per-DB activity (CareStack blob layout). */
+function formatBackupArtifactLabel(
+  db: Pick<DatabaseRow, "name" | "accountName" | "conversionName">,
+  at: Date
+): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const stamp = `${at.getFullYear()}${pad(at.getMonth() + 1)}${pad(at.getDate())}_${pad(at.getHours())}${pad(at.getMinutes())}${pad(at.getSeconds())}`;
+  const parsed = parseDatabaseContext(db.name);
+  const account = db.accountName ?? parsed.accountName ?? "UnknownAccount";
+  const conversion = db.conversionName ?? parsed.conversionName ?? "UnknownConversion";
+  return `\\${account}\\${conversion}\\${db.name}_${stamp}.zip`;
+}
+
 /** Build a complete audit entry with DB + server resolved from state when possible */
 function makeActivityEntry(
   get: () => { databases: DatabaseRow[] },
@@ -668,15 +681,24 @@ export const useDerivizStore = create<DerivizState>()((set, get) => {
         });
         return { databases };
       });
+      const row = get().databases.find((d) => d.id === dbId);
       get().logActivity(
-        action === "Backup" ? "Backup requested" : `Manual override: ${action}`,
+        action === "Backup"
+          ? formatBackupArtifactLabel(
+              row ?? {
+                name: dbId,
+                accountName: null,
+                conversionName: null,
+              },
+              now
+            )
+          : `Manual override: ${action}`,
         dbId
       );
       // Manual override should not auto-execute destructive work immediately.
       // Delete / Backup&Delete become scheduled lifecycle states and should only
       // execute by due-date flow (or explicit Delete Now).
       if (action === "Backup") {
-        const row = get().databases.find((d) => d.id === dbId);
         get().enqueueOperation({
           dbId,
           dbName: row?.name ?? dbId,

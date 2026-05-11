@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useActivityForDb, useDerivizStore } from "../store/useDerivizStore";
 import { ClassificationBadge, AutoBackedUpBadge } from "./Badge";
 import { Toggle } from "./Toggle";
-import { formatShortDate } from "../lib/classify";
+import { formatShortDate, parseDatabaseContext } from "../lib/classify";
 
 type SlideoutAction =
   | "lift_exclusion"
@@ -16,26 +16,6 @@ type SlideoutAction =
 
 /** Selected action while drafting “exclude” — empty until user picks (required). */
 type ActionChoice = SlideoutAction | "";
-
-/** MM/DD/YYYY → yyyy-mm-dd (valid calendar day in UTC). */
-function parseUsDateToIso(s: string): string | null {
-  const t = s.trim();
-  const m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (!m) return null;
-  const mo = Number(m[1]);
-  const da = Number(m[2]);
-  const yr = Number(m[3]);
-  if (mo < 1 || mo > 12 || da < 1 || da > 31) return null;
-  const iso = `${yr}-${String(mo).padStart(2, "0")}-${String(da).padStart(2, "0")}`;
-  const check = new Date(`${iso}T12:00:00.000Z`);
-  if (
-    check.getUTCFullYear() !== yr ||
-    check.getUTCMonth() + 1 !== mo ||
-    check.getUTCDate() !== da
-  )
-    return null;
-  return iso;
-}
 
 function isoToUsMMDDYYYY(ymd: string): string {
   if (!ymd || !/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return "";
@@ -47,6 +27,10 @@ function formatDbDayUs(iso: string | null): string {
   if (!iso) return "—";
   const ymd = new Date(iso).toISOString().slice(0, 10);
   return isoToUsMMDDYYYY(ymd);
+}
+
+function isLiveDatabase(db: { name: string; classification: string | null }): boolean {
+  return db.classification === "Live" || parseDatabaseContext(db.name).isLive;
 }
 
 function Field({ label, value }: { label: string; value: string }) {
@@ -88,6 +72,10 @@ export function DBDetailSlideout({
     )
   );
   const act       = useActivityForDb(dbId ?? "");
+  const isLiveDb = useMemo(
+    () => Boolean(db && isLiveDatabase(db)),
+    [db]
+  );
   const { minScheduleIso, maxScheduleIso } = useMemo(() => {
     const now = new Date();
     const min = new Date(now);
@@ -103,7 +91,10 @@ export function DBDetailSlideout({
   /** Store still excluded, user turned draft toggle off — must pick a fresh date before save. */
   const liftingExclusionDraft = excluded && !draftExcluded;
   const [scheduleDateInput, setScheduleDateInput] = useState("");
-  const scheduleIso = useMemo(() => parseUsDateToIso(scheduleDateInput), [scheduleDateInput]);
+  const scheduleIso = useMemo(() => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(scheduleDateInput)) return null;
+    return scheduleDateInput;
+  }, [scheduleDateInput]);
 
   useEffect(() => {
     if (!db) return;
@@ -115,7 +106,7 @@ export function DBDetailSlideout({
     if (db.deletionDate) {
       const iso = new Date(db.deletionDate).toISOString().slice(0, 10);
       if (iso >= minScheduleIso && iso <= maxScheduleIso) {
-        setScheduleDateInput(isoToUsMMDDYYYY(iso));
+        setScheduleDateInput(iso);
         return;
       }
     }
@@ -124,14 +115,13 @@ export function DBDetailSlideout({
     const fallback = d.toISOString().slice(0, 10);
     const pick =
       fallback < minScheduleIso ? minScheduleIso : fallback > maxScheduleIso ? maxScheduleIso : fallback;
-    setScheduleDateInput(isoToUsMMDDYYYY(pick));
+    setScheduleDateInput(pick);
   }, [db, minScheduleIso, maxScheduleIso, draftExcluded, excluded, liftingExclusionDraft]);
 
   const [selectedAction, setSelectedAction] = useState<ActionChoice>("delete");
   const [showBackupConfirm, setShowBackupConfirm] = useState(false);
   const [actionTouched, setActionTouched] = useState(false);
   const [dateTouched, setDateTouched] = useState(false);
-  const [excludeSaveWarning, setExcludeSaveWarning] = useState(false);
   const [liftSaveWarning, setLiftSaveWarning] = useState(false);
   const prevDraftExcludedRef = useRef(draftExcluded);
   const excludeDraftPairRef = useRef<string | null>(null);
@@ -148,18 +138,11 @@ export function DBDetailSlideout({
       setDateTouched(false);
       setSelectedAction("");
       setActionTouched(false);
-      setExcludeSaveWarning(false);
     }
     excludeDraftPairRef.current = pair;
   }, [draftExcluded, excluded, applyingNewExclusion]);
 
   const actionOptions: { value: SlideoutAction; label: string }[] = useMemo(() => {
-    if (applyingNewExclusion) {
-      return [
-        { value: "delete", label: "Delete" },
-        { value: "backup_delete", label: "Backup & Delete" },
-      ];
-    }
     if (draftExcluded && excluded) {
       return [{ value: "lift_exclusion", label: "Lift Exclusion" }];
     }
@@ -178,6 +161,12 @@ export function DBDetailSlideout({
       ];
     }
     if (st === "Backup & Delete") {
+      if (db && isLiveDatabase(db)) {
+        return [
+          { value: "backup_delete", label: "Backup & Delete" },
+          { value: "delete", label: "Delete" },
+        ];
+      }
       return [
         { value: "reschedule", label: "Reschedule" },
         { value: "delete", label: "Delete" },
@@ -187,7 +176,7 @@ export function DBDetailSlideout({
       { value: "delete", label: "Delete" },
       { value: "backup_delete", label: "Backup & Delete" },
     ];
-  }, [applyingNewExclusion, draftExcluded, excluded, db?.action]);
+  }, [draftExcluded, excluded, db]);
 
   useEffect(() => {
     if (actionTouched) return;
@@ -197,7 +186,9 @@ export function DBDetailSlideout({
     }
     if (liftingExclusionDraft) {
       const preferredAction: SlideoutAction =
-        db?.action === "Backup & Delete" ? "reschedule" : "delete";
+        db?.action === "Backup & Delete"
+          ? (isLiveDb ? "backup_delete" : "reschedule")
+          : "delete";
       const hasPreferred = actionOptions.some((opt) => opt.value === preferredAction);
       setSelectedAction(hasPreferred ? preferredAction : (actionOptions[0]?.value ?? "delete"));
       return;
@@ -206,7 +197,7 @@ export function DBDetailSlideout({
       draftExcluded && excluded
         ? "lift_exclusion"
         : db?.action === "Backup & Delete"
-          ? "reschedule"
+          ? (isLiveDb ? "backup_delete" : "reschedule")
           : "delete";
     const hasPreferred = actionOptions.some((opt) => opt.value === preferredAction);
     setSelectedAction(hasPreferred ? preferredAction : (actionOptions[0]?.value ?? "delete"));
@@ -216,6 +207,7 @@ export function DBDetailSlideout({
     draftExcluded,
     excluded,
     db?.action,
+    isLiveDb,
     actionOptions,
     actionTouched,
   ]);
@@ -232,7 +224,6 @@ export function DBDetailSlideout({
     if (wasDraftExcluded && !draftExcluded && excluded && db) {
       setScheduleDateInput("");
       setDateTouched(false);
-      setExcludeSaveWarning(false);
     }
     prevDraftExcludedRef.current = draftExcluded;
   }, [draftExcluded, excluded, db]);
@@ -241,11 +232,8 @@ export function DBDetailSlideout({
     !!scheduleIso &&
     scheduleIso >= minScheduleIso &&
     scheduleIso <= maxScheduleIso;
-  const exclusionAuditOk =
-    !applyingNewExclusion ||
-    (scheduleDateOk &&
-      (selectedAction === "delete" || selectedAction === "backup_delete"));
   const exclusionChanged = draftExcluded !== excluded;
+  const quickActionsDisabled = readOnly || draftExcluded;
   const exclusionTurnOn = exclusionChanged && applyingNewExclusion;
   const exclusionLiftOff = exclusionChanged && !draftExcluded && excluded;
   const actionChanged = !draftExcluded && (actionTouched || dateTouched);
@@ -255,10 +243,6 @@ export function DBDetailSlideout({
       exclusionLiftOff ||
       (actionChanged && scheduleDateOk && !liftingExclusionDraft));
   const backupButtonDisabled = readOnly || draftExcluded || backupInProgress;
-
-  useEffect(() => {
-    if (exclusionAuditOk || !applyingNewExclusion) setExcludeSaveWarning(false);
-  }, [exclusionAuditOk, applyingNewExclusion]);
 
   useEffect(() => {
     if (!liftingExclusionDraft || scheduleDateOk) setLiftSaveWarning(false);
@@ -293,27 +277,17 @@ export function DBDetailSlideout({
 
   function handleSave() {
     if (!db) return;
-    if (exclusionTurnOn && !exclusionAuditOk) {
-      setExcludeSaveWarning(true);
-      return;
-    }
     if (exclusionLiftOff && !scheduleDateOk) {
       setLiftSaveWarning(true);
       return;
     }
     if (!canSave) return;
-    setExcludeSaveWarning(false);
     setLiftSaveWarning(false);
 
     if (exclusionChanged) {
       if (draftExcluded) {
         if (!excluded) {
-          const ctx =
-            selectedAction === "backup_delete" ? "Backup & Delete" : "Delete";
-          logActivity(
-            `Excluded — documented context: ${ctx} · triggered date ${scheduleIso ? isoToUsMMDDYYYY(scheduleIso) : ""}`,
-            db.id
-          );
+          logActivity("Excluded from automated actions", db.id);
         }
         setExcluded(db.id, true);
       } else {
@@ -447,7 +421,6 @@ export function DBDetailSlideout({
                     if (v && !excluded) {
                       setScheduleDateInput("");
                       setDateTouched(false);
-                      setExcludeSaveWarning(false);
                     }
                   }}
                   ariaLabel="Exclude"
@@ -484,31 +457,22 @@ export function DBDetailSlideout({
               </button>
             </div>
             <div
-              className={readOnly || (draftExcluded && excluded) ? "pointer-events-none opacity-60" : ""}
-              aria-disabled={readOnly || (draftExcluded && excluded)}
+              className={quickActionsDisabled ? "pointer-events-none opacity-60" : ""}
+              aria-disabled={quickActionsDisabled}
             >
               <label className="flex flex-col gap-1">
                 <span className="text-[11px]" style={{ color: "#5D6F7E" }}>
                   Action
-                  {applyingNewExclusion ? (
-                    <span className="font-normal" style={{ color: "#96A3AF" }}>
-                      {" "}
-                      (required)
-                    </span>
-                  ) : null}
                 </span>
                 <select
                   className="c-select w-full"
-                  disabled={readOnly || (draftExcluded && excluded)}
+                  disabled={quickActionsDisabled}
                   value={selectedAction}
                   onChange={(e) => {
                     setSelectedAction(e.target.value as ActionChoice);
                     setActionTouched(true);
                   }}
                 >
-                  {applyingNewExclusion ? (
-                    <option value="">Select action (required)</option>
-                  ) : null}
                   {actionOptions.map((opt) => (
                     <option key={opt.value} value={opt.value}>
                       {opt.label}
@@ -518,52 +482,42 @@ export function DBDetailSlideout({
               </label>
               <label className="mt-3 flex flex-col gap-1">
                 <span className="text-[11px]" style={{ color: "#5D6F7E" }}>
-                  Triggered date context (required)
+                  Triggered date context
                 </span>
                 <input
-                  type="text"
-                  inputMode="numeric"
-                  placeholder="MM/DD/YYYY"
-                  autoComplete="off"
+                  type="date"
                   className="c-input w-full tabular-nums"
-                  disabled={readOnly || (draftExcluded && excluded)}
+                  disabled={quickActionsDisabled}
+                  min={minScheduleIso}
+                  max={maxScheduleIso}
                   value={scheduleDateInput}
-                  aria-label="Triggered date context MM/DD/YYYY"
+                  aria-label="Triggered date context"
                   onChange={(e) => {
                     setScheduleDateInput(e.target.value);
                     setDateTouched(true);
                   }}
                 />
                 <span className="text-[10px]" style={{ color: "#96A3AF" }}>
-                  MM/DD/YYYY — choose from today to two months ahead.
+                  Choose from today through two months ahead.
                 </span>
               </label>
             </div>
-            {excludeSaveWarning && applyingNewExclusion ? (
-              <p className="text-[11px] font-medium" style={{ color: "#B23838" }} role="alert">
-                Select an action and a valid triggered date (MM/DD/YYYY) before saving exclusion.
-              </p>
-            ) : null}
             {liftSaveWarning && liftingExclusionDraft ? (
               <p className="text-[11px] font-medium" style={{ color: "#B23838" }} role="alert">
-                Enter a valid triggered date (MM/DD/YYYY) before lifting exclusion.
+                Enter a valid triggered date before lifting exclusion.
               </p>
             ) : null}
             {readOnly ? (
               <p className="text-[11px]" style={{ color: "#96A3AF" }}>
                 Deleted records are read-only.
               </p>
-            ) : draftExcluded && excluded ? (
+            ) : draftExcluded ? (
               <p className="text-[11px]" style={{ color: "#96A3AF" }}>
                 Turn off Exclusion to enable actions.
               </p>
-            ) : applyingNewExclusion ? (
-              <p className="text-[11px]" style={{ color: "#96A3AF" }}>
-                Document the lifecycle context for this exclusion (required to save).
-              </p>
             ) : liftingExclusionDraft ? (
               <p className="text-[11px]" style={{ color: "#96A3AF" }}>
-                Enter triggered date (MM/DD/YYYY, required) to lift exclusion and save your schedule.
+                Enter triggered date (required) to lift exclusion and save your schedule.
               </p>
             ) : null}
           </div>
